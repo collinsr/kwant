@@ -1,0 +1,1 @@
+kwiver_add_executable( scoring_session_backend scoring_session_backend.cxx )

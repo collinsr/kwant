@@ -69,3 +69,4 @@ include( kwiver-utils )
 include( kwiver-flags ) # use same compile flags as kwiver
 
 add_subdirectory( scoring_framework )
+add_subdirectory( api )
