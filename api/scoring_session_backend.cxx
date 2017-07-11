@@ -23,55 +23,54 @@ using kwiver::track_oracle::domain_handle_type;
 
 struct ssb_response_t
 {
-  string state;  // "complete", "start", "update"
-  string status; // "ok", "err"
-  string cmd;    // whatever the command was
-  ssb_response_t(): state("invalid"), status("invalid"), cmd("invalid") {}
-
-  void complete_error( const string& msg );
-  void complete_okay( const string& msg );
-  void add_kv( const string& key, const string& val );
-  void add_kv( const string& key, const domain_handle_type& val );
+  ssb_response_t& complete_error( const string& msg );
+  ssb_response_t& complete_okay( const string& msg );
+  ssb_response_t& add_kv( const string& key, const string& val );
+  ssb_response_t& add_kv( const string& key, const domain_handle_type& val );
   void emit_as_json( ostream& os ) const;
 private:
   map <string, string> other_kv;
 };
 
 typedef vector< string > args_t;
-typedef function< void( const args_t&, ssb_response_t& resp ) > scoring_command_t;
+typedef function< ssb_response_t ( const args_t&, ssb_response_t& resp ) > scoring_command_t;
 
-void
+ssb_response_t&
 ssb_response_t
 ::complete_error( const string& msg )
 {
-  this->state = "complete";
-  this->status = "err";
+  this->add_kv("state", "complete");
+  this->add_kv("status","err" );
   this->add_kv( "msg", msg );
+  return *this;
 }
 
-void
+ssb_response_t&
 ssb_response_t
 ::complete_okay( const string& msg )
 {
-  this->state = "complete";
-  this->status = "ok";
+  this->add_kv("state", "complete");
+  this->add_kv("status", "okay" );
   this->add_kv( "msg", msg );
+  return *this;
 }
 
-void
+ssb_response_t&
 ssb_response_t
 ::add_kv( const string& key, const string& v )
 {
   this->other_kv[ key ] = v;
+  return *this;
 }
 
-void
+ssb_response_t&
 ssb_response_t
 ::add_kv( const string& key, const domain_handle_type& v )
 {
   ostringstream oss;
   oss << v;
   this->add_kv( key, oss.str() );
+  return *this;
 }
 
 void
@@ -80,9 +79,6 @@ ssb_response_t
 {
   JSONNode root(JSON_NODE);
   root.set_name("ssb-response");
-  root.push_back( JSONNode( "state", this->state ));
-  root.push_back( JSONNode( "status", this->status ));
-  root.push_back( JSONNode( "cmd", this->cmd ));
   for (auto kv: this->other_kv)
   {
     root.push_back( JSONNode( kv.first, kv.second ));
@@ -91,69 +87,48 @@ ssb_response_t
   os << "EOD" << endl;
 }
 
-void
+ssb_response_t
 load_tracks_command( const args_t& args, ssb_response_t& resp )
 {
-  if (args.size() != 2)
-  {
-    resp.complete_error( "Incorrect number of arguments" );
-    return;
-  }
+  if (args.size() != 2) return resp.complete_error( "Incorrect number of arguments" );
+
   track_handle_list_type tracks;
-  if ( ! file_format_manager::read( args[1], tracks ))
-  {
-    resp.complete_error( "Failed to load tracks" );
-    return;
-  }
+  if ( ! file_format_manager::read( args[1], tracks )) return resp.complete_error( "Failed to load tracks" );
+
   handle_list_type h = track_oracle_core::track_to_generic_handle_list( tracks );
   domain_handle_type d = track_oracle_core::create_domain( h );
   resp.add_kv( "tracks", d );
   ostringstream oss;
   oss << "Loaded " << tracks.size() << " tracks";
-  resp.complete_okay( oss.str() );
+  return resp.complete_okay( oss.str() );
 }
 
-void
+ssb_response_t
 write_tracks_command( const args_t& args, ssb_response_t& resp )
 {
-  if (args.size() != 3)
-  {
-    resp.complete_error( "Incorrect number of arguments" );
-    return;
-  }
+  if (args.size() != 3) return resp.complete_error( "Incorrect number of arguments" );
+
   istringstream iss( args[2] );
   domain_handle_type d;
-  if ( ! ( iss >> d ))
-  {
-    resp.complete_error( "Couldn't extract domain handle from '"+args[2]+"'" );
-    return;
-  }
-  if ( ! track_oracle_core::is_domain_defined( d ))
-  {
-    resp.complete_error( "No such domain '" + args[2] + "'" );
-    return;
-  }
+  if ( ! ( iss >> d )) return resp.complete_error( "Couldn't extract domain handle from '"+args[2]+"'" );
+
+  if ( ! track_oracle_core::is_domain_defined( d )) return resp.complete_error( "No such domain '" + args[2] + "'" );
+
   handle_list_type h = track_oracle_core::get_domain( d );
   track_handle_list_type tracks = track_oracle_core::generic_to_track_handle_list( h );
   ofstream os( args[1].c_str() );
-  if ( ! os )
-  {
-    resp.complete_error( "Couldn't open '"+args[1]+"' for writing");
-    return;
-  }
-  if ( ! track_oracle_core::write_kwiver( os, tracks ))
-  {
-    resp.complete_error( "Couldn't write '"+args[1]+"'" );
-    return;
-  }
+  if ( ! os ) return resp.complete_error( "Couldn't open '"+args[1]+"' for writing");
+  if ( ! track_oracle_core::write_kwiver( os, tracks )) return resp.complete_error( "Couldn't write '"+args[1]+"'" );
+
   ostringstream oss;
   oss << "Wrote " << tracks.size() << " tracks";
-  resp.complete_okay( oss.str() );
+  return resp.complete_okay( oss.str() );
 }
 
-void
+ssb_response_t
 load_detections_command( const args_t& args, ssb_response_t& resp )
 {
+  return resp;
 }
 
 int main( int argc, char *argv[] )
@@ -165,9 +140,7 @@ int main( int argc, char *argv[] )
 
   {
     ssb_response_t ready;
-    ready.state = "complete";
-    ready.status = "ok";
-    ready.cmd = "ready";
+    ready.add_kv( "state", "ready" );
     ready.emit_as_json( cout );
   }
 
@@ -178,7 +151,7 @@ int main( int argc, char *argv[] )
     istringstream iss( line );
 
     ssb_response_t resp;
-    resp.cmd = line;
+    resp.add_kv("cmd", line);
     string tmp;
 
     args_t args;
@@ -188,8 +161,8 @@ int main( int argc, char *argv[] )
     }
     if (args.empty())
     {
-      resp.state = "complete";
-      resp.status = "ok";
+      resp.add_kv("state", "complete");
+      resp.add_kv("status", "ok");
     }
     else
     {
@@ -197,8 +170,6 @@ int main( int argc, char *argv[] )
       auto probe = dispatch_table.find( key );
       if (probe == dispatch_table.end())
       {
-        resp.state = "complete";
-        resp.status = "err";
         resp.complete_error( "unknown keyword '"+key+"'" );
       }
       else
@@ -209,8 +180,6 @@ int main( int argc, char *argv[] )
     resp.emit_as_json( cout );
   }
   ssb_response_t done;
-  done.state = "complete";
-  done.status = "ok";
-  done.cmd = "quit";
+  done.add_kv("state", "done");
   done.emit_as_json( cout );
 }

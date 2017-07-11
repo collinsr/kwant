@@ -6,7 +6,7 @@ SBB_EXE = '/Users/collinsr/code/pub/kwant-collinsr-bin/bin/scoring_session_backe
 import subprocess
 import json
 
-proc = subprocess.Popen( [SBB_EXE], stdout=subprocess.PIPE )
+proc = subprocess.Popen( [SBB_EXE], stdout=subprocess.PIPE, stderr=subprocess.PIPE )
 payload = ''
 while True:
     line = proc.stdout.readline()
