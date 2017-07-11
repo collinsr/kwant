@@ -1,0 +1,132 @@
+
+So how would you write (say)
+"score_tracks --hadwav --fn2ts --truth-tracks truth.rtt --computed-tracks detects.kw18 --detection-mode --gt-filter vtype==11" ?
+
+--
+ct = load_detections( "detects.kw18" )
+gt = load_detections( "truth.rtt" )
+gt_filtered = filter( gt, "vtype==11" )
+
+a = align( gt_filtered, ct, field=frame_num )
+
+matches = compute_overlap( a )  // 1-pixel, 1-frame
+
+metrics = compute_metrics( matches )
+
+report( metrics )
+--
+
+How about this:
+
+score_events --fn2ts --computed-tracks OUTPUT.yolo2.800m/detections.kw18 --truth-tracks truth/stab-800m-g4-25mm/c1-g4-25mm-800m-stab.kw18 --detection-mode --attributes truth/stab-800m-g4-25mm/c1-g4-25mm-800m-stab.kw18.attributes:d:Type,Person --do pr,roc --pvo OUTPUT.yolo2.800m/detections.txt:p --roc-dump v800m.roc --pr-dump v800m.pr --min-pcent-gt-ct 5:5 --match-frames-lower-bound 1 --write-tracks 800m.kwcsv --time-window M
+
+whoa!
+
+--
+gt = load_detections( "c1-g4-25mm-800m-stab.kw18" )
+ct = load_detections( "detections.kw18" )
+attr = load_attributes( gt.name+".attributes" )
+
+gt_filtered = filter( gt, attr, "Type,Person" )
+
+set_confidences( ct, style="pvo:p", src="detections.txt" )
+
+tw = time_window( gt_filtered, ct, field="frame_num", style="M" )
+
+a = align( gt_filtered, ct, tw )
+
+matches = compute_overlaps(a, min_pcent_gt_ct=5:5, match_frames_lower_bound=1 )
+
+roc = compute_roc( matches )
+pr = compute_pr( matches )
+
+write_tracks( "800m.kwcsv" )
+--
+
+So gt, ct, gt_filtered can be domains on the backend. Let front-end do all the things like
+gt.name+".attributes", etc.
+
+We'd need back-end support for a. We'd need back-end support to persist matches.
+
+But if metrics is just a json blob, then report() can be totally front-end.
+
+--
+--
+--
+
+So what does align() do on the back-end?
+
+- Takes a field_name and a tolerance
+- generates the sorted unique values from ct and gt
+- marches down this list, establishing correspondences
+- Want an output that supports begin() / end() and returns a struct:
+    frame_handle_list_type left, right
+  where left and right are on matched frames
+- (also keeps a statistics report)
+- pseudo-code:
+    struct align_record_t<align_T> {
+      align_T self, other;
+      frame_handle_list_type self_frames;
+    };
+
+    struct correspondence_t<align_T> {
+      const vector<align_T>& left, &right;
+      size_t self_index, other_index;
+      bool self_is_left;
+      double diff_beween_self_and_other(); // return abs(diff)
+      void advance_self();
+      void advance_other();
+      void enforce_self_is_lower();
+      size_t left_index();
+      size_t right_index();
+      bool still_going();
+    }
+
+    void align( track_handle_list left, track_handle_list right,
+                string align_field_name, double tolerance ) {
+    s = lookup_element_store( align_field_name )
+    vector< s::Type > unique_sorted_left = sort( get_unique_values( s, left ) );   // aka USL
+    vector< s::Type > unique_sorted_right = sort( get_unique_values( s, right ))   // aka USR
+
+    correspondence_t<s::Type> cursor(USL, USR);
+    // cursor invariant: if cursor is valid, self.align_t is always <= other.align_t
+
+    map< s::Type, align_record_t< s::Type > > left_dict, right_dict;
+    while cursor.still_going() {
+      d = cursor.diff_between_self_and_other();
+      if (d <= tolerance) {
+
+        // we have a match
+        // ...remember it
+        left_dict.add_record( USL.cursor.left_index(), USR.cursor.right_index() ); // empty frames for now
+        right_dict.add_record( USR.cursor.right_index(), USL.cursor.left_index() ); // empty frames for now
+        // ...move up
+        cursor.advance_self()
+        cursor.advance_other()
+
+      } else {
+
+        // since self is always lowest, if we don't match other now,
+        // we never will. So advance self
+
+        cursor.advance_self()
+
+        // check if self is still lower (may require switching left/right)
+
+        cursor.enforce_self_is_lower();
+
+      }
+   } // ... while cursor is valid
+
+   //
+   // We now have left_dict and right_dict set up so that for left_dict:
+   // - key of left_dict is an align_field (i.e. timestamp, frame_num) from left tracks
+   // - if key is not in left_dict, all detections in left with that key have NO MATCH
+   // - if key is in dict and is (say) p, then:
+   // --- p.self is key
+   // --- p.other is the corresponding timestamp from right
+   //
+   // Just need to set p.self_frames such that it is the set of frames which have
+   // p.self as an align_field
+
+   for f in left.frames:
