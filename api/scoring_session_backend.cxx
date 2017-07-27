@@ -6,6 +6,7 @@
 #include <map>
 #include <sstream>
 #include <json.h>
+#include <memory>
 
 #include <track_oracle/core/track_oracle_api_types.h>
 #include <track_oracle/core/track_oracle_core.h>
@@ -32,8 +33,42 @@ private:
   map <string, string> other_kv;
 };
 
+//
+// symbol table
+//
+
+struct ssb_symbol_base_t
+{
+  enum class s_t { invalid, domain } flavor;
+  ssb_symbol_base_t(): flavor( s_t::invalid ) {}
+  virtual ~ssb_symbol_base_t() {}
+  explicit ssb_symbol_base_t( s_t f ): flavor( f ) {}
+};
+
+struct ssb_symbol_domain_t: public ssb_symbol_base_t
+{
+  domain_handle_type payload;
+  ssb_symbol_domain_t( const domain_handle_type& p ): ssb_symbol_base_t( s_t::domain ), payload(p) {}
+};
+
+
+class symbol_table_t
+{
+public:
+  symbol_table_t(): id_counter(0) {}
+  size_t add_domain( const domain_handle_type& d)
+  {
+    size_t id = id_counter++;
+    t[id] = std::unique_ptr<ssb_symbol_base_t>( new ssb_symbol_domain_t(d) );
+    return id;
+  }
+private:
+  size_t id_counter;
+  map< size_t, std::unique_ptr<ssb_symbol_base_t> > t;
+};
+
 typedef vector< string > args_t;
-typedef function< ssb_response_t ( const args_t&, ssb_response_t& resp ) > scoring_command_t;
+typedef function< ssb_response_t ( const args_t&, symbol_table_t&, ssb_response_t& ) > scoring_command_t;
 
 ssb_response_t&
 ssb_response_t
@@ -88,7 +123,7 @@ ssb_response_t
 }
 
 ssb_response_t
-load_tracks_command( const args_t& args, ssb_response_t& resp )
+load_tracks_command( const args_t& args, symbol_table_t& st, ssb_response_t& resp )
 {
   if (args.size() != 2) return resp.complete_error( "Incorrect number of arguments" );
 
@@ -97,6 +132,7 @@ load_tracks_command( const args_t& args, ssb_response_t& resp )
 
   handle_list_type h = track_oracle_core::track_to_generic_handle_list( tracks );
   domain_handle_type d = track_oracle_core::create_domain( h );
+  size_t id = st.add_domain( d );
   resp.add_kv( "tracks", d );
   ostringstream oss;
   oss << "Loaded " << tracks.size() << " tracks";
@@ -104,7 +140,7 @@ load_tracks_command( const args_t& args, ssb_response_t& resp )
 }
 
 ssb_response_t
-write_tracks_command( const args_t& args, ssb_response_t& resp )
+write_tracks_command( const args_t& args, symbol_table_t&, ssb_response_t& resp )
 {
   if (args.size() != 3) return resp.complete_error( "Incorrect number of arguments" );
 
@@ -126,7 +162,7 @@ write_tracks_command( const args_t& args, ssb_response_t& resp )
 }
 
 ssb_response_t
-load_detections_command( const args_t& args, ssb_response_t& resp )
+load_detections_command( const args_t& args, symbol_table_t&, ssb_response_t& resp )
 {
   return resp;
 }
@@ -145,6 +181,7 @@ int main( int argc, char *argv[] )
   }
 
   string line;
+  symbol_table_t symbol_table;
 
   while ( getline( cin, line ))
   {
@@ -174,7 +211,7 @@ int main( int argc, char *argv[] )
       }
       else
       {
-        probe->second( args, resp );
+        probe->second( args, symbol_table, resp );
       }
     }
     resp.emit_as_json( cout );
