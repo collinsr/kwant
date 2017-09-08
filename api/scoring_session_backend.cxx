@@ -62,10 +62,16 @@ public:
     t[id] = std::unique_ptr<ssb_symbol_base_t>( new ssb_symbol_domain_t(d) );
     return id;
   }
+  domain_handle_type get_domain( size_t id )
+  {
+    auto bp = this->t[id];
+    
+  }
 private:
   size_t id_counter;
   map< size_t, std::unique_ptr<ssb_symbol_base_t> > t;
 };
+
 
 typedef vector< string > args_t;
 typedef function< ssb_response_t ( const args_t&, symbol_table_t&, ssb_response_t& ) > scoring_command_t;

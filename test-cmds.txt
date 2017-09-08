@@ -1,0 +1,2 @@
+load_tracks foo.kwxml
+write_tracks bar.kwxml 1
